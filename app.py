@@ -72,7 +72,7 @@ st.markdown("""
     .med-risk { background-color: #FFFBEB; color: #D97706; border: 2px solid #FDE047; }
     .low-risk { background-color: #F0FDF4; color: #16A34A; border: 2px solid #BBF7D0; }
     
-    /* Clinical Note Box (REVISI: Judul Diperbarui) */
+    /* Clinical Note Box */
     .clinical-note-box { 
         background-color: #F8FAFC; 
         border-left: 6px solid #0d9488; 
@@ -86,6 +86,15 @@ st.markdown("""
     .clinical-note-title {
         font-weight: 700; color: #0f172a; font-size: 18px; margin-bottom: 12px;
         display: flex; align-items: center; gap: 8px;
+    }
+    
+    /* LACE Card Box */
+    .lace-box {
+        background: #F1F5F9;
+        border: 1px solid #CBD5E1;
+        padding: 15px 20px;
+        border-radius: 10px;
+        margin-top: 15px;
     }
     
     /* System Status Footer */
@@ -120,7 +129,7 @@ translate = {
     'Age': 'Usia Pasien', 'Medication_Count': 'Jumlah Resep Obat'
 }
 
-# 📌 REVISI BARU: Format Value Cerdas (Memberikan makna pada skala)
+# --- FORMATTER NILAI CERDAS ---
 def format_value(feat, val):
     try:
         val_float = float(val)
@@ -147,8 +156,58 @@ def format_value(feat, val):
     elif feat in ['Medication_Count', 'Number_of_Admissions', 'Previous_Hospitalization']: return f"{int(val_float)} kali/jenis"
     else: return str(val)
 
+# --- PERHITUNGAN SKOR INDEKS LACE (STANDAR REVIEWER) ---
+def calculate_lace_score(los, emergency_admission, diabetes, hypertension, ckd, previous_hosp):
+    # 1. L (Length of Stay) Scoring
+    los_int = int(los)
+    if los_int == 0: l_score = 0
+    elif los_int == 1: l_score = 1
+    elif los_int == 2: l_score = 2
+    elif los_int == 3: l_score = 3
+    elif 4 <= los_int <= 6: l_score = 4
+    elif 7 <= los_int <= 13: l_score = 5
+    else: l_score = 7
+
+    # 2. A (Acuity of Admission) Scoring (1 = Emergency/IGD, 0 = Elective)
+    a_score = 3 if emergency_admission == 1 else 0
+
+    # 3. C (Comorbidities - Charlson Comorbidity Index approximation)
+    comorbid_count = 0
+    if str(diabetes).lower() == 'yes': comorbid_count += 1
+    if str(hypertension).lower() == 'yes': comorbid_count += 1
+    if str(ckd).lower() == 'yes': comorbid_count += 1
+    
+    if comorbid_count == 0: c_score = 0
+    elif comorbid_count == 1: c_score = 1
+    elif comorbid_count == 2: c_score = 2
+    elif comorbid_count == 3: c_score = 3
+    else: c_score = 5
+
+    # 4. E (Emergency Department Visits in past 6 months)
+    prev_visits = int(previous_hosp)
+    if prev_visits == 0: e_score = 0
+    elif prev_visits == 1: e_score = 1
+    elif prev_visits == 2: e_score = 2
+    elif prev_visits == 3: e_score = 3
+    else: e_score = 4
+
+    total_lace = l_score + a_score + c_score + e_score
+
+    if total_lace <= 4: lace_risk = "Risiko Rendah (0–4)"
+    elif total_lace <= 9: lace_risk = "Risiko Sedang (5–9)"
+    else: lace_risk = "Risiko Tinggi (10–19)"
+
+    return {
+        'total': total_lace,
+        'l': l_score,
+        'a': a_score,
+        'c': c_score,
+        'e': e_score,
+        'comorbid_count': comorbid_count,
+        'risk_category': lace_risk
+    }
+
 # --- GENERATOR PARAGRAF KLINIS ---
-# 📌 REVISI BARU: Menggunakan <b> untuk BOLD di HTML, dan formatter cerdas
 def generate_clinical_paragraph(predicted_label, increasers, decreasers):
     if predicted_label == 'High':
         status_text = "kondisi kardiovaskular pasien saat ini berada dalam zona <b>Risiko Tinggi</b> untuk mengalami komplikasi lanjutan dan berpotensi sangat besar membutuhkan rawat inap berulang."
@@ -163,7 +222,7 @@ def generate_clinical_paragraph(predicted_label, increasers, decreasers):
         if len(good_items) == 1:
             good_features_text = f"Stabilitas ini sangat didukung oleh indikator {good_items[0]} yang merespon amat baik terhadap manajemen medis."
         elif len(good_items) > 1:
-            good_features_text = f"Ketahanan tubuh pasien saat ini dipengaruhi secara signifikan oleh stabilitas pada {', '.join(good_items[:-1])}, serta {good_items[-1]}. Parameter positif ini secara aktif melindungi fungsi organ vital pasien."
+            good_features_text = f"Ketahanan tubuh pasien saat ini terbantu secara signifikan oleh stabilitas pada {', '.join(good_items[:-1])}, serta {good_items[-1]}. Parameter positif ini secara aktif melindungi fungsi organ vital pasien."
 
     warning_features_text = ""
     if increasers:
@@ -192,7 +251,7 @@ def apply_preset(level):
         st.session_state[k] = v
 
 # --- GENERATOR REPORT (PDF) ---
-def generate_pdf(patient_name, predicted_label, confidence, clinical_paragraph, vitals):
+def generate_pdf(patient_name, predicted_label, confidence, clinical_paragraph, lace_data, vitals):
     pdf = FPDF()
     pdf.add_page()
     
@@ -227,32 +286,38 @@ def generate_pdf(patient_name, predicted_label, confidence, clinical_paragraph, 
     pdf.set_font("Arial", '', 11)
     pdf.cell(0, 6, txt=f"Tingkat Kepercayaan Prediksi (Confidence Level): {confidence:.1f}%", ln=True)
     
+    # Validasi LACE di PDF
+    pdf.ln(4)
+    pdf.set_font("Arial", 'B', 12)
+    pdf.set_text_color(11, 90, 92)
+    pdf.cell(0, 7, txt=f"Validasi Klinis Indeks LACE: Skor Total = {lace_data['total']} ({lace_data['risk_category']})", ln=True)
+    pdf.set_font("Arial", '', 10)
+    pdf.set_text_color(30, 41, 59)
+    pdf.cell(0, 5, txt=f"Rincian: L={lace_data['l']} pts, A={lace_data['a']} pts, C={lace_data['c']} pts, E={lace_data['e']} pts", ln=True)
+
     pdf.set_text_color(15, 23, 42)
     pdf.set_font("Arial", 'B', 12)
-    pdf.ln(5)
+    pdf.ln(4)
     pdf.cell(0, 8, txt="Rekaman Tanda Vital Utama:", ln=True)
     pdf.set_font("Arial", '', 11)
     pdf.cell(0, 6, txt=f"- Tekanan Darah  : {int(vitals['Systolic_BP'])}/{int(vitals['Diastolic_BP'])} mmHg", ln=True)
     pdf.cell(0, 6, txt=f"- Detak Jantung  : {int(vitals['Heart_Rate'])} bpm    |  Saturasi Oksigen: {int(vitals['Oxygen_Saturation'])}%", ln=True)
     pdf.cell(0, 6, txt=f"- Pompa (EF)       : {vitals['Ejection_Fraction']}%           |  Kadar Troponin  : {vitals['Troponin']} ng/mL", ln=True)
     
-    pdf.ln(8)
+    pdf.ln(6)
     pdf.set_font("Arial", 'B', 12)
     pdf.set_text_color(15, 23, 42)
     pdf.cell(0, 8, txt="Catatan Evaluasi Klinis (Narrative Summary):", ln=True)
     
-    # Memasukkan Paragraf Klinis ke PDF
     pdf.set_font("Arial", '', 11)
     pdf.set_text_color(30, 41, 59)
-    
-    # 📌 REVISI BARU: Menghapus tag HTML <b> dan </b> agar bersih saat diprint ke PDF
     clean_paragraph = re.sub(r'<[^>]+>', '', clinical_paragraph)
-    pdf.multi_cell(0, 6, txt=clean_paragraph)
+    pdf.multi_cell(0, 5.5, txt=clean_paragraph)
 
-    pdf.ln(20)
+    pdf.ln(15)
     pdf.set_font("Arial", 'I', 8)
     pdf.set_text_color(148, 163, 184)
-    pdf.multi_cell(0, 4, txt="*DISCLAIMER: Dokumen klinis elektronik ini dihasilkan secara otomatis oleh kecerdasan buatan (Explainable AI). Hasil ini ditujukan sebagai Clinical Decision Support System dan tidak mensubstitusi opini profesional Dokter Spesialis Kardiologi.")
+    pdf.multi_cell(0, 4, txt="*DISCLAIMER: Dokumen klinis elektronik ini dihasilkan secara otomatis oleh kecerdasan buatan (Explainable AI) dan divalidasi dengan Indeks LACE. Hasil ini ditujukan sebagai Clinical Decision Support System dan tidak mensubstitusi opini profesional Dokter Spesialis Kardiologi.")
     
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
         pdf.output(tmp.name)
@@ -290,7 +355,7 @@ with st.sidebar:
 st.markdown("""
 <div class="hero-container">
     <div class="hero-title">CardioCare <span>AI</span></div>
-    <div class="hero-subtitle">Platform pendukung keputusan medis tingkat lanjut (CDSS). Memanfaatkan arsitektur <i>Hybrid Entropy Stacking</i> untuk memprediksi risiko rehospitalisasi penyakit kardiovaskular secara presisi.</div>
+    <div class="hero-subtitle">Platform pendukung keputusan medis tingkat lanjut (CDSS). Memanfaatkan arsitektur <i>Hybrid Entropy Stacking</i> & Validasi <b>Indeks LACE</b> untuk memprediksi risiko rehospitalisasi kardiovaskular.</div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -339,7 +404,7 @@ with tab3:
         st.number_input("Jumlah Riwayat Opname Sebelumnya", 0, 20, key='Previous_Hospitalization')
         st.number_input("Total Kunjungan RS", 1, 50, key='Number_of_Admissions')
     with c6:
-        st.selectbox("Masuk Lewat Jalur IGD?", [0, 1], format_func=lambda x: "Tidak" if x==0 else "Ya", key='Emergency_Admission')
+        st.selectbox("Masuk Lewat Jalur IGD?", [0, 1], format_func=lambda x: "Tidak (Elektif)" if x==0 else "Ya (Darurat/IGD)", key='Emergency_Admission')
         st.number_input("Jumlah Resep Obat Berjalan", 1, 20, key='Medication_Count')
         st.slider("Kepatuhan Minum Obat (0-10)", 0, 10, key='Medication_Adherence')
         st.slider("Kehadiran Kontrol Dokter (0-10)", 0, 10, key='Followup_Attendance')
@@ -351,7 +416,7 @@ predict_btn = st.button("🔬 JALANKAN DIAGNOSIS AI SEKARANG")
 st.markdown('</div>', unsafe_allow_html=True)
 
 if predict_btn:
-    with st.spinner('Menghubungkan ke Engine AI. Melakukan komputasi Shapley Additive Explanations...'):
+    with st.spinner('Menghubungkan ke Engine AI. Menghitung Skor LACE & Shapley Explanations...'):
         input_data = {col: st.session_state[col] for col in feature_names}
         df_input = pd.DataFrame([input_data])
         df_encoded = df_input.copy()
@@ -368,6 +433,16 @@ if predict_btn:
         target_le = encoders['Risk_Label']
         predicted_label = target_le.inverse_transform([prediction_encoded])[0]
         confidence = prediction_proba[prediction_encoded] * 100
+
+        # Hitung Indeks LACE secara otomatis
+        lace = calculate_lace_score(
+            st.session_state['Length_of_Stay'],
+            st.session_state['Emergency_Admission'],
+            st.session_state['Diabetes'],
+            st.session_state['Hypertension'],
+            st.session_state['CKD'],
+            st.session_state['Previous_Hospitalization']
+        )
 
         explainer = shap.TreeExplainer(model)
         shap_values = explainer(df_encoded)
@@ -395,6 +470,20 @@ if predict_btn:
         with r3:
             st.metric(label="Saturasi O2 / Detak Jantung", value=f"{st.session_state['Oxygen_Saturation']}% / {st.session_state['Heart_Rate']}")
             st.metric(label="Tensi Darah", value=f"{int(st.session_state['Systolic_BP'])}/{int(st.session_state['Diastolic_BP'])}")
+        
+        # --- KOMPONEN INDEKS LACE PANEL ---
+        st.markdown(f"""
+        <div class="lace-box">
+            <b>📊 Validasi Klinis Indeks LACE (Skor Total: {lace['total']} / 19) — {lace['risk_category']}</b><br>
+            <span style="font-size: 14px; color: #475569;">
+            • <b>L</b> (Length of Stay - {st.session_state['Length_of_Stay']} hari): <b>{lace['l']} poin</b> | 
+            • <b>A</b> (Acuity of Admission): <b>{lace['a']} poin</b> | 
+            • <b>C</b> (Comorbidity - {lace['comorbid_count']} kondisi penyerta): <b>{lace['c']} poin</b> | 
+            • <b>E</b> (Emergency Visits - {st.session_state['Previous_Hospitalization']} riwayat): <b>{lace['e']} poin</b>
+            </span>
+        </div>
+        """, unsafe_allow_html=True)
+
         st.markdown('</div>', unsafe_allow_html=True)
 
         feature_importance = list(zip(feature_names, instance_shap_values, df_input.iloc[0].values))
@@ -403,22 +492,21 @@ if predict_btn:
         risk_increasers = [f for f in feature_importance if f[1] > 0]
         risk_decreasers = [f for f in feature_importance if f[1] < 0]
 
-        # MENGGUNAKAN PENDEKATAN PARAGRAF NARATIF (NLG)
         clinical_paragraph = generate_clinical_paragraph(predicted_label, risk_increasers, risk_decreasers)
 
         st.markdown("### 🗣️ Catatan Evaluasi Klinis (Narrative Summary)")
         st.markdown(f"""
         <div class="clinical-note-box">
-            <div class="clinical-note-title">📑 Ringkasan Evaluasi Medis (AI-Assisted)</div>
+            <div class="clinical-note-title">📑 Ringkasan Evaluasi Medis (AI-Assisted & LACE Validated)</div>
             {clinical_paragraph}
         </div><br>
         """, unsafe_allow_html=True)
 
         # --- GENERATE PDF BUTTON ---
-        pdf_data = generate_pdf(patient_name if patient_name else "NN (Tanpa Nama)", predicted_label, confidence, clinical_paragraph, input_data)
+        pdf_data = generate_pdf(patient_name if patient_name else "NN (Tanpa Nama)", predicted_label, confidence, clinical_paragraph, lace, input_data)
         
         st.download_button(
-            label="📄 CETAK BERKAS LAPORAN DIAGNOSIS (.PDF)",
+            label="📄 CETAK BERKAS LAPORAN DIAGNOSIS & LACE (.PDF)",
             data=pdf_data,
             file_name=f"Report_CardioCare_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf",
             mime="application/pdf",
