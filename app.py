@@ -156,9 +156,8 @@ def format_value(feat, val):
     elif feat in ['Medication_Count', 'Number_of_Admissions', 'Previous_Hospitalization']: return f"{int(val_float)} kali/jenis"
     else: return str(val)
 
-# --- PERHITUNGAN SKOR INDEKS LACE (STANDAR REVIEWER) ---
+# --- PERHITUNGAN SKOR INDEKS LACE ---
 def calculate_lace_score(los, emergency_admission, diabetes, hypertension, ckd, previous_hosp):
-    # 1. L (Length of Stay) Scoring
     los_int = int(los)
     if los_int == 0: l_score = 0
     elif los_int == 1: l_score = 1
@@ -168,10 +167,8 @@ def calculate_lace_score(los, emergency_admission, diabetes, hypertension, ckd, 
     elif 7 <= los_int <= 13: l_score = 5
     else: l_score = 7
 
-    # 2. A (Acuity of Admission) Scoring (1 = Emergency/IGD, 0 = Elective)
     a_score = 3 if emergency_admission == 1 else 0
 
-    # 3. C (Comorbidities - Charlson Comorbidity Index approximation)
     comorbid_count = 0
     if str(diabetes).lower() == 'yes': comorbid_count += 1
     if str(hypertension).lower() == 'yes': comorbid_count += 1
@@ -183,7 +180,6 @@ def calculate_lace_score(los, emergency_admission, diabetes, hypertension, ckd, 
     elif comorbid_count == 3: c_score = 3
     else: c_score = 5
 
-    # 4. E (Emergency Department Visits in past 6 months)
     prev_visits = int(previous_hosp)
     if prev_visits == 0: e_score = 0
     elif prev_visits == 1: e_score = 1
@@ -193,9 +189,9 @@ def calculate_lace_score(los, emergency_admission, diabetes, hypertension, ckd, 
 
     total_lace = l_score + a_score + c_score + e_score
 
-    if total_lace <= 4: lace_risk = "Risiko Rendah (0–4)"
-    elif total_lace <= 9: lace_risk = "Risiko Sedang (5–9)"
-    else: lace_risk = "Risiko Tinggi (10–19)"
+    if total_lace <= 4: lace_risk = "Risiko Rendah (0-4)"
+    elif total_lace <= 9: lace_risk = "Risiko Sedang (5-9)"
+    else: lace_risk = "Risiko Tinggi (10-19)"
 
     return {
         'total': total_lace,
@@ -235,6 +231,22 @@ def generate_clinical_paragraph(predicted_label, increasers, decreasers):
     paragraph = f"Berdasarkan hasil kalkulasi AI, {status_text} {good_features_text}{warning_features_text}"
     return paragraph
 
+# --- FUNGSI PEMBERSIH TEKS UNTUK PDF (MENCEGAH UNICODE ERROR) ---
+def clean_pdf_text(text):
+    if not isinstance(text, str):
+        return str(text)
+    # Hapus tag HTML
+    text = re.sub(r'<[^>]+>', '', text)
+    # Ganti karakter khusus unicode yang tidak didukung latin1 FPDF
+    replacements = {
+        '–': '-', '—': '-', '“': '"', '”': '"', '‘': "'", '’': "'",
+        '•': '-', '…': '...'
+    }
+    for k, v in replacements.items():
+        text = text.replace(k, v)
+    # Encode ke latin1 dengan mengabaikan/mengganti karakter yang tidak dikenal
+    return text.encode('latin-1', 'replace').decode('latin-1')
+
 # --- DATA PRESET SIMULASI ---
 presets = {
     'low': {'Age': 45, 'Gender': 'Male', 'Marital_Status': 'Married', 'Education': 'Bachelor', 'Occupation': 'Civil Servant', 'Smoking_Status': 'Non-Smoker', 'Smoking_Behavior': 0, 'Physical_Activity': 8, 'Diet_Adherence': 9, 'Systolic_BP': 115.0, 'Diastolic_BP': 75.0, 'Heart_Rate': 72.0, 'Respiratory_Rate': 16.0, 'Oxygen_Saturation': 99.0, 'BMI': 22.5, 'Ejection_Fraction': 65.0, 'Creatinine': 0.8, 'Troponin': 0.01, 'Cholesterol': 160.0, 'Diabetes': 'No', 'Hypertension': 'No', 'CKD': 'No', 'Length_of_Stay': 2, 'ICU_Admission': 0, 'Previous_Hospitalization': 0, 'Number_of_Admissions': 1, 'Emergency_Admission': 0, 'Medication_Count': 1, 'Medication_Adherence': 10, 'Followup_Attendance': 10},
@@ -258,17 +270,17 @@ def generate_pdf(patient_name, predicted_label, confidence, clinical_paragraph, 
     # Design Premium Header PDF
     pdf.set_font("Arial", 'B', 22)
     pdf.set_text_color(11, 90, 92)
-    pdf.cell(0, 12, txt="CardioCare AI", ln=True, align='L')
+    pdf.cell(0, 12, txt=clean_pdf_text("CardioCare AI"), ln=True, align='L')
     pdf.set_font("Arial", 'B', 12)
     pdf.set_text_color(100, 116, 139)
-    pdf.cell(0, 8, txt="Clinical Decision Support System - HES Framework", ln=True, align='L')
+    pdf.cell(0, 8, txt=clean_pdf_text("Clinical Decision Support System - HES Framework"), ln=True, align='L')
     pdf.line(10, 32, 200, 32)
     
     pdf.set_xy(10, 37)
     pdf.set_font("Arial", '', 11)
     pdf.set_text_color(30, 41, 59)
-    pdf.cell(0, 6, txt=f"Identitas Pasien   : {patient_name}", ln=True)
-    pdf.cell(0, 6, txt=f"Tanggal Evaluasi : {datetime.now().strftime('%d %B %Y, %H:%M WIB')}", ln=True)
+    pdf.cell(0, 6, txt=clean_pdf_text(f"Identitas Pasien   : {patient_name}"), ln=True)
+    pdf.cell(0, 6, txt=clean_pdf_text(f"Tanggal Evaluasi : {datetime.now().strftime('%d %B %Y, %H:%M WIB')}"), ln=True)
     
     pdf.ln(6)
     pdf.set_font("Arial", 'B', 14)
@@ -282,42 +294,42 @@ def generate_pdf(patient_name, predicted_label, confidence, clinical_paragraph, 
         pdf.set_text_color(22, 163, 74)
         risk_text = "RISIKO RENDAH (LOW)"
         
-    pdf.cell(0, 8, txt=f"KESIMPULAN AI : {risk_text}", ln=True)
+    pdf.cell(0, 8, txt=clean_pdf_text(f"KESIMPULAN AI : {risk_text}"), ln=True)
     pdf.set_font("Arial", '', 11)
-    pdf.cell(0, 6, txt=f"Tingkat Kepercayaan Prediksi (Confidence Level): {confidence:.1f}%", ln=True)
+    pdf.cell(0, 6, txt=clean_pdf_text(f"Tingkat Kepercayaan Prediksi (Confidence Level): {confidence:.1f}%"), ln=True)
     
     # Validasi LACE di PDF
     pdf.ln(4)
     pdf.set_font("Arial", 'B', 12)
     pdf.set_text_color(11, 90, 92)
-    pdf.cell(0, 7, txt=f"Validasi Klinis Indeks LACE: Skor Total = {lace_data['total']} ({lace_data['risk_category']})", ln=True)
+    pdf.cell(0, 7, txt=clean_pdf_text(f"Validasi Klinis Indeks LACE: Skor Total = {lace_data['total']} ({lace_data['risk_category']})"), ln=True)
     pdf.set_font("Arial", '', 10)
     pdf.set_text_color(30, 41, 59)
-    pdf.cell(0, 5, txt=f"Rincian: L={lace_data['l']} pts, A={lace_data['a']} pts, C={lace_data['c']} pts, E={lace_data['e']} pts", ln=True)
+    pdf.cell(0, 5, txt=clean_pdf_text(f"Rincian: L={lace_data['l']} pts, A={lace_data['a']} pts, C={lace_data['c']} pts, E={lace_data['e']} pts"), ln=True)
 
     pdf.set_text_color(15, 23, 42)
     pdf.set_font("Arial", 'B', 12)
     pdf.ln(4)
-    pdf.cell(0, 8, txt="Rekaman Tanda Vital Utama:", ln=True)
+    pdf.cell(0, 8, txt=clean_pdf_text("Rekaman Tanda Vital Utama:"), ln=True)
     pdf.set_font("Arial", '', 11)
-    pdf.cell(0, 6, txt=f"- Tekanan Darah  : {int(vitals['Systolic_BP'])}/{int(vitals['Diastolic_BP'])} mmHg", ln=True)
-    pdf.cell(0, 6, txt=f"- Detak Jantung  : {int(vitals['Heart_Rate'])} bpm    |  Saturasi Oksigen: {int(vitals['Oxygen_Saturation'])}%", ln=True)
-    pdf.cell(0, 6, txt=f"- Pompa (EF)       : {vitals['Ejection_Fraction']}%           |  Kadar Troponin  : {vitals['Troponin']} ng/mL", ln=True)
+    pdf.cell(0, 6, txt=clean_pdf_text(f"- Tekanan Darah  : {int(vitals['Systolic_BP'])}/{int(vitals['Diastolic_BP'])} mmHg"), ln=True)
+    pdf.cell(0, 6, txt=clean_pdf_text(f"- Detak Jantung  : {int(vitals['Heart_Rate'])} bpm    |  Saturasi Oksigen: {int(vitals['Oxygen_Saturation'])}%"), ln=True)
+    pdf.cell(0, 6, txt=clean_pdf_text(f"- Pompa (EF)       : {vitals['Ejection_Fraction']}%           |  Kadar Troponin  : {vitals['Troponin']} ng/mL"), ln=True)
     
     pdf.ln(6)
     pdf.set_font("Arial", 'B', 12)
     pdf.set_text_color(15, 23, 42)
-    pdf.cell(0, 8, txt="Catatan Evaluasi Klinis (Narrative Summary):", ln=True)
+    pdf.cell(0, 8, txt=clean_pdf_text("Catatan Evaluasi Klinis (Narrative Summary):"), ln=True)
     
     pdf.set_font("Arial", '', 11)
     pdf.set_text_color(30, 41, 59)
-    clean_paragraph = re.sub(r'<[^>]+>', '', clinical_paragraph)
-    pdf.multi_cell(0, 5.5, txt=clean_paragraph)
+    cleaned_paragraph = clean_pdf_text(clinical_paragraph)
+    pdf.multi_cell(0, 5.5, txt=cleaned_paragraph)
 
     pdf.ln(15)
     pdf.set_font("Arial", 'I', 8)
     pdf.set_text_color(148, 163, 184)
-    pdf.multi_cell(0, 4, txt="*DISCLAIMER: Dokumen klinis elektronik ini dihasilkan secara otomatis oleh kecerdasan buatan (Explainable AI) dan divalidasi dengan Indeks LACE. Hasil ini ditujukan sebagai Clinical Decision Support System dan tidak mensubstitusi opini profesional Dokter Spesialis Kardiologi.")
+    pdf.multi_cell(0, 4, txt=clean_pdf_text("*DISCLAIMER: Dokumen klinis elektronik ini dihasilkan secara otomatis oleh kecerdasan buatan (Explainable AI) dan divalidasi dengan Indeks LACE. Hasil ini ditujukan sebagai Clinical Decision Support System dan tidak mensubstitusi opini profesional Dokter Spesialis Kardiologi."))
     
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
         pdf.output(tmp.name)
@@ -434,7 +446,6 @@ if predict_btn:
         predicted_label = target_le.inverse_transform([prediction_encoded])[0]
         confidence = prediction_proba[prediction_encoded] * 100
 
-        # Hitung Indeks LACE secara otomatis
         lace = calculate_lace_score(
             st.session_state['Length_of_Stay'],
             st.session_state['Emergency_Admission'],
@@ -471,7 +482,6 @@ if predict_btn:
             st.metric(label="Saturasi O2 / Detak Jantung", value=f"{st.session_state['Oxygen_Saturation']}% / {st.session_state['Heart_Rate']}")
             st.metric(label="Tensi Darah", value=f"{int(st.session_state['Systolic_BP'])}/{int(st.session_state['Diastolic_BP'])}")
         
-        # --- KOMPONEN INDEKS LACE PANEL ---
         st.markdown(f"""
         <div class="lace-box">
             <b>📊 Validasi Klinis Indeks LACE (Skor Total: {lace['total']} / 19) — {lace['risk_category']}</b><br>
