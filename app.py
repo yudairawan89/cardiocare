@@ -371,7 +371,7 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-patient_name = st.text_input("Identitas Pasien / No. Rekam Medis (Digunakan untuk header cetak PDF)", placeholder="Masukkan nama atau ID rekam medis pasien di sini...", max_chars=50)
+patient_name = st.text_input("Identitas Pasien / No. Rekam Medis", placeholder="Masukkan nama atau ID rekam medis pasien di sini...", max_chars=50)
 
 st.markdown('<div class="card">', unsafe_allow_html=True)
 tab1, tab2, tab3 = st.tabs(["👤 Demografi & Gaya Hidup", "🩺 Tanda Vital & Laboratorium", "🏥 Riwayat Perawatan & Farmasi"])
@@ -516,7 +516,7 @@ if predict_btn:
         pdf_data = generate_pdf(patient_name if patient_name else "NN (Tanpa Nama)", predicted_label, confidence, clinical_paragraph, lace, input_data)
         
         st.download_button(
-            label="📄 CETAK BERKAS LAPORAN DIAGNOSIS & LACE (.PDF)",
+            label="📄 CETAK PDF",
             data=pdf_data,
             file_name=f"Report_CardioCare_{datetime.now().strftime('%Y%m%d_%H%M')}.pdf",
             mime="application/pdf",
