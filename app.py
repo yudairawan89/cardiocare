@@ -361,7 +361,7 @@ with st.sidebar:
         st.button("🔴 Kritis", on_click=apply_preset, args=('high',))
         st.markdown('</div>', unsafe_allow_html=True)
         
-    st.markdown('<div class="sys-status">🟢 System Online | Model: HES-LightGBM v2.1<br>Accuracy Validation: 98.00%</div>', unsafe_allow_html=True)
+    st.markdown('<div class="sys-status">🟢 System Online | Model: HES-Machine Learning v1<br>Tahun 2026</div>', unsafe_allow_html=True)
 
 # --- HEADER APLIKASI UTAMA (HERO BANNER) ---
 st.markdown("""
